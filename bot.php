@@ -52,24 +52,39 @@ function CreateZip($files = array(), $destination, $password = null, $overwrite 
 function makeInlineKeyboard($text)
 {
 	$keyboard = [];
-	$explode = explode("\n", $text);
-	$i = 0; $j = 0;
-	foreach ($explode as $values) {
-		$value = explode(', ', $values);
-		foreach ($value as $inline) {
-			preg_match('#(.+?)\|(.+)#i', $inline, $matches);
-			if (filter_var($matches[2], FILTER_VALIDATE_URL)) {
-				$keyboard[$i][$j]['text'] = $matches[1];
-				$keyboard[$i][$j]['url'] = $matches[2];
+	$lines = explode("\n", trim($text));
+	
+	foreach ($lines as $line_index => $line) {
+		if (empty(trim($line))) continue;
+		
+		$buttons = explode(',', $line);
+		$row = [];
+		
+		foreach ($buttons as $button) {
+			$button = trim($button);
+			if (empty($button)) continue;
+			
+			if (preg_match('#^(.+?)\|(.+)$#', $button, $matches)) {
+				$button_text = trim($matches[1]);
+				$button_url = trim($matches[2]);
+				
+				if (!empty($button_text) && filter_var($button_url, FILTER_VALIDATE_URL)) {
+					$row[] = [
+						'text' => $button_text,
+						'url' => $button_url
+					];
+				}
 			}
-			$keyboard[$i][$j] = array_reverse($keyboard[$i][$j]);
-			$j++;
 		}
-		$keyboard[$i] = array_reverse($keyboard[$i]);
-		$i++;
-		$j = 0;
+		
+		if (!empty($row)) {
+			$keyboard[] = $row;
+		}
 	}
-	if ($keyboard != null) return ['inline_keyboard' => $keyboard];
+	
+	if (!empty($keyboard)) {
+		return ['inline_keyboard' => $keyboard];
+	}
 	return null;
 }
 ##----------------------
@@ -363,21 +378,21 @@ else {
 	);
 }
 
-$ads_menu = json_encode(
-	[
-		'inline_keyboard' => [
-			[
-				['text'=>'✏️ ثبت تبلیغ','callback_data'=>'✏️ ثبت تبلیغ']
-			],
-			[
-				['text'=>'🗒 لیست تبلیغات','callback_data'=>'🗒 لیست تبلیغات']
-			],
-			[
-				['text'=>'🔙 بازگشت به مدیریت','callback_data'=>'🔙 بازگشت به مدیریت']
+	$ads_menu = json_encode(
+		[
+			'inline_keyboard' => [
+				[
+					['text'=>'✏️ ثبت تبلیغ','callback_data'=>'ads_create']
+				],
+				[
+					['text'=>'🗒 لیست تبلیغات','callback_data'=>'ads_list']
+				],
+				[
+					['text'=>'🔙 بازگشت به مدیریت','callback_data'=>'🔙 بازگشت به مدیریت']
+				]
 			]
 		]
-	]
-);
+	);
 ##----------------------Dev
 $panel = json_encode(
 	[
@@ -403,9 +418,9 @@ $panel = json_encode(
 			[
 				['text'=>'✖️ حذف ربات','callback_data'=>'✖️ حذف ربات'],['text'=>'🤖 تعداد مجاز','callback_data'=>'🤖 تعداد مجاز']
 			],
-			[
-				['text'=>'💠 تبلیغات','callback_data'=>'💠 تبلیغات']
-			],
+							[
+					['text'=>'💠 تبلیغات','callback_data'=>'ads_main']
+				],
 			[
 				['text'=>'🔙 بازگشت','callback_data'=>'🔙 بازگشت']
 			]
@@ -431,15 +446,15 @@ $backpanel = json_encode(
 		]
 	]
 );
-$backpanelads = json_encode(
-	[
-		'inline_keyboard' => [
-			[
-				['text'=>'🔙 بازگشت به تبلیغات','callback_data'=>'🔙 بازگشت به تبلیغات']
+	$backpanelads = json_encode(
+		[
+			'inline_keyboard' => [
+				[
+					['text'=>'🔙 بازگشت به تبلیغات','callback_data'=>'ads_main']
+				]
 			]
 		]
-	]
-);
+	);
 $remove = json_encode(
 	[
 		'KeyboardRemove' => [],
@@ -980,30 +995,206 @@ elseif (preg_match('#^token\_(?<bot>.+)$#', $text, $matches)) {
 		respondMessage("🔰 لطفا توکن جدید ربات @{$bot} را ارسال کنید.", $back_keyboard);
 	}
 }
-elseif ($text == 'no_button') {
+##------------------- Ads Management Callback Queries
+elseif (preg_match('#^ads_main$#', $text)) {
 	$data['step'] = "none";
 	file_put_contents("Data/$from_id/data.json", json_encode($data));
-	respondMessage("✅ تبلیغ شما بدون دکمه شیشه ای ثبت شد.", $ads_menu);
+	respondMessage("🧮 به بخش تبلیغات ربات خوش آمدید.\n✏️ لطفا یکی از دکمه های زیر را انتخاب کنید.", $ads_menu, 'markdown');
 }
-elseif ($text == 'confirm_yes') {
-	$data['step'] = "none";
-	file_put_contents("Data/$from_id/data.json", json_encode($data));
-	respondMessage("✅ تبلیغ شما با موفقیت ثبت شد.", $ads_menu);
+elseif (preg_match('#^ads_create$#', $text)) {
+	$ads = json_decode(file_get_contents('Data/ads.json'), true);
+	if (count($ads) > 5) {
+		respondMessage("🚨 امکان ثبت بیش از 5 تبلیغ وجود ندارد.\n🔰 لطفا ابتدا از بخش « 🗑 حذف تبلیغ » اقدام به حذف برخی تبلیغات قدیمی نمایید.", $ads_menu, 'markdown');
+	} else {
+		$data['step'] = "setads";
+		file_put_contents("Data/$from_id/data.json", json_encode($data));
+		respondMessage("🔰 لطفا تبلیغ مورد نظر خود را بفرستید.", $backpanelads);
+	}
 }
-elseif ($text == 'confirm_no') {
+elseif (preg_match('#^ads_list$#', $text)) {
+	$ads = json_decode(file_get_contents('Data/ads.json'), true);
+	$count = count($ads);
+	if ($count < 1) {
+		respondMessage('❗️ هیچ تبلیغی ثبت نشده است.', $ads_menu);
+	} else {
+		$ads_list_text = "📊 تعداد : $count\n\n";
+		$inline_keyboard = [];
+		foreach ($ads as $key => $ad) {
+			$ads_list_text .= "🔦 کد : $key\n";
+			$ads_list_text .= "🔦 نوع : " . str_replace(['video', 'photo', 'document', 'text'], ['🎥 ویدیو', '🌠 تصویر', '📎 فایل', '📃 متن'], $ad['type']) . "\n";
+			$ads_list_text .= "🧭 تعداد بازدید : " . $ad['count'] . "\n";
+			$ads_list_text .= "🔰 نمایش : " . ($ad['on'] == true ? '✅ بله' : '❌ خیر') . "\n";
+			$ads_list_text .= "📌 دکمه شیشه ای : " . ($ad['keyboard'] == null ? '❌ ندارد' : '✅ دارد') . "\n";
+			$ads_list_text .= "\n";
+			$inline_keyboard[] = [
+				['text' => "🗑 حذف تبلیغ کد $key", 'callback_data' => "ads_delete_$key"],
+				['text' => ($ad['on'] ? '❌ غیرفعال' : '✅ فعال'), 'callback_data' => "ads_toggle_$key"]
+			];
+		}
+		$inline_keyboard[] = [['text' => '🔙 بازگشت به تبلیغات', 'callback_data' => 'ads_main']];
+		$reply_markup = json_encode(['inline_keyboard' => $inline_keyboard]);
+		respondMessage($ads_list_text, $reply_markup);
+	}
+}
+elseif (preg_match('#^ads_delete_([0-9]+)$#', $text, $matches)) {
+	$ad_code = $matches[1];
+	$ads = json_decode(file_get_contents('Data/ads.json'), true);
+	if (!isset($ads[$ad_code])) {
+		respondMessage('❗️ تبلیغ مورد نظر شما وجود ندارد.', $ads_menu);
+	} else {
+		$data['step'] = "delete-$ad_code";
+		file_put_contents("Data/$from_id/data.json", json_encode($data));
+		
+		// نمایش اطلاعات تبلیغ در همین پیام
+		$type_display = str_replace(['video', 'photo', 'document', 'text'], ['🎥 ویدیو', '🌠 تصویر', '📎 فایل', '📃 متن'], $ads[$ad_code]['type']);
+		$has_keyboard = $ads[$ad_code]['keyboard'] != null ? '✅ دارد' : '❌ ندارد';
+		$status = $ads[$ad_code]['on'] ? '✅ فعال' : '❌ غیرفعال';
+		
+		$preview_text = "🗑 حذف تبلیغ کد $ad_code\n\n";
+		$preview_text .= "📋 جزئیات تبلیغ:\n";
+		$preview_text .= "🔦 نوع: $type_display\n";
+		$preview_text .= "📝 متن: " . mb_substr($ads[$ad_code]['text'], 0, 100) . (mb_strlen($ads[$ad_code]['text']) > 100 ? '...' : '') . "\n";
+		$preview_text .= "🔘 دکمه شیشه‌ای: $has_keyboard\n";
+		$preview_text .= "🎯 وضعیت: $status\n";
+		$preview_text .= "📊 تعداد بازدید: " . $ads[$ad_code]['count'] . "\n\n";
+		$preview_text .= "⚠️ آیا از حذف این تبلیغ مطمئن هستید؟";
+		
+		$delete_confirm_keyboard = json_encode([
+			'inline_keyboard' => [
+				[
+					['text' => '👀 مشاهده تبلیغ', 'callback_data' => "ads_preview_$ad_code"]
+				],
+				[
+					['text' => '🗑 بله، حذف کن', 'callback_data' => "ads_delete_confirm_$ad_code"],
+					['text' => '❌ انصراف', 'callback_data' => 'ads_list']
+				]
+			]
+		]);
+		respondMessage($preview_text, $delete_confirm_keyboard);
+	}
+}
+elseif (preg_match('#^ads_delete_confirm_([0-9]+)$#', $text, $matches)) {
+	$ad_code = $matches[1];
+	$ads = json_decode(file_get_contents('Data/ads.json'), true);
+	if (isset($ads[$ad_code])) {
+		unset($ads[$ad_code]);
+		file_put_contents('Data/ads.json', json_encode($ads));
+		respondMessage('✅ تبلیغ مورد نظر شما با موفقیت حذف شد.', $ads_menu);
+	} else {
+		respondMessage('❗️ تبلیغ مورد نظر شما وجود ندارد.', $ads_menu);
+	}
 	$data['step'] = "none";
 	file_put_contents("Data/$from_id/data.json", json_encode($data));
+}
+elseif (preg_match('#^ads_toggle_([0-9]+)$#', $text, $matches)) {
+	$ad_code = $matches[1];
+	$ads = json_decode(file_get_contents('Data/ads.json'), true);
+	if (isset($ads[$ad_code])) {
+		$ads[$ad_code]['on'] = !$ads[$ad_code]['on'];
+		file_put_contents('Data/ads.json', json_encode($ads));
+		$status = $ads[$ad_code]['on'] ? 'فعال' : 'غیرفعال';
+		respondMessage("✅ وضعیت نمایش تبلیغ تغییر یافت. حالت فعلی: $status", $ads_menu);
+	} else {
+		respondMessage('❗️ تبلیغ مورد نظر شما وجود ندارد.', $ads_menu);
+	}
+}
+elseif (preg_match('#^ads_nokeyboard_([0-9]+)$#', $text, $matches)) {
+	$ad_code = $matches[1];
+	$ads = json_decode(file_get_contents('Data/ads.json'), true);
+	if (isset($ads[$ad_code])) {
+		$ads[$ad_code]['keyboard'] = null;
+		file_put_contents('Data/ads.json', json_encode($ads));
+		
+		// نمایش پیش‌نمایش نهایی
+		$type = $ads[$ad_code]['type'];
+		$method = str_replace(['video', 'photo', 'document', 'text'], ['sendVideo', 'sendPhoto', 'sendDocument', 'sendMessage'], $type);
+		$dataa = [
+			'chat_id' => $chat_id,
+			'parse_mode' => 'html'
+		];
+		if ($type == 'text') {
+			$dataa['text'] = $ads[$ad_code]['text'];
+			$dataa['disable_web_page_preview'] = true;
+		} else {
+			$dataa[$type] = 'https://telegram.me/' . str_replace('@', '', $public_logchannel) . '/' . $ads[$ad_code]['file_id'];
+			$dataa['caption'] = $ads[$ad_code]['text'];
+		}
+		bot($method, $dataa);
+		
+		$final_confirm_keyboard = json_encode([
+			'inline_keyboard' => [
+				[
+					['text' => '✅ تأیید و ثبت نهایی', 'callback_data' => "ads_final_confirm_$ad_code"],
+					['text' => '❌ لغو', 'callback_data' => "ads_cancel_$ad_code"]
+				]
+			]
+		]);
+		respondMessage("👆🏻 تبلیغ مورد نظر به شرح بالا است (بدون دکمه شیشه‌ای).\n💠 آیا از ثبت نهایی آن مطمئن هستید؟", $final_confirm_keyboard);
+		
+		$data['step'] = "none";
+		file_put_contents("Data/$from_id/data.json", json_encode($data));
+	}
+}
+elseif (preg_match('#^ads_final_confirm_([0-9]+)$#', $text, $matches)) {
+	$ad_code = $matches[1];
+	$ads = json_decode(file_get_contents('Data/ads.json'), true);
+	if (isset($ads[$ad_code])) {
+		$ads[$ad_code]['on'] = true;
+		file_put_contents('Data/ads.json', json_encode($ads));
+		respondMessage("✅ تبلیغ مورد نظر شما با موفقیت ثبت شد.", $ads_menu);
+	} else {
+		respondMessage('❗️ خطا در ثبت تبلیغ.', $ads_menu);
+	}
+	$data['step'] = "none";
+	file_put_contents("Data/$from_id/data.json", json_encode($data));
+}
+elseif (preg_match('#^ads_cancel_([0-9]+)$#', $text, $matches)) {
+	$ad_code = $matches[1];
+	$ads = json_decode(file_get_contents('Data/ads.json'), true);
+	if (isset($ads[$ad_code])) {
+		unset($ads[$ad_code]);
+		file_put_contents('Data/ads.json', json_encode($ads));
+	}
 	respondMessage("❌ ثبت تبلیغ لغو شد.", $ads_menu);
-}
-elseif ($text == 'delete_yes') {
 	$data['step'] = "none";
 	file_put_contents("Data/$from_id/data.json", json_encode($data));
-	respondMessage("✅ تبلیغ با موفقیت حذف شد.", $ads_menu);
 }
-elseif ($text == 'delete_no') {
-	$data['step'] = "none";
-	file_put_contents("Data/$from_id/data.json", json_encode($data));
-	respondMessage("❌ حذف تبلیغ لغو شد.", $ads_menu);
+elseif (preg_match('#^ads_preview_([0-9]+)$#', $text, $matches)) {
+	$ad_code = $matches[1];
+	$ads = json_decode(file_get_contents('Data/ads.json'), true);
+	if (isset($ads[$ad_code])) {
+		// نمایش تبلیغ واقعی
+		$type = $ads[$ad_code]['type'];
+		$method = str_replace(['video', 'photo', 'document', 'text'], ['sendVideo', 'sendPhoto', 'sendDocument', 'sendMessage'], $type);
+		$dataa = [
+			'chat_id' => $chat_id,
+			'parse_mode' => 'html'
+		];
+		if ($type == 'text') {
+			$dataa['text'] = $ads[$ad_code]['text'];
+			$dataa['disable_web_page_preview'] = true;
+		} else {
+			$dataa[$type] = 'https://telegram.me/' . str_replace('@', '', $public_logchannel) . '/' . $ads[$ad_code]['file_id'];
+			$dataa['caption'] = $ads[$ad_code]['text'];
+		}
+		if ($ads[$ad_code]['keyboard'] != null) {
+			$dataa['reply_markup'] = json_encode($ads[$ad_code]['keyboard']);
+		}
+		bot($method, $dataa);
+		
+		// ارسال پیام توضیحی
+		$back_to_delete_keyboard = json_encode([
+			'inline_keyboard' => [
+				[
+					['text' => '🗑 حذف این تبلیغ', 'callback_data' => "ads_delete_$ad_code"],
+					['text' => '🔙 بازگشت به لیست', 'callback_data' => 'ads_list']
+				]
+			]
+		]);
+		sendMessage($chat_id, "👆🏻 این تبلیغ به شرح بالا است.", null, null, $back_to_delete_keyboard);
+	} else {
+		respondMessage('❗️ تبلیغ مورد نظر شما وجود ندارد.', $ads_menu);
+	}
 }
 ##----------------------
 if ($from_id == $admin && $chat_id > 0) {
@@ -1035,16 +1226,8 @@ if ($from_id == $admin && $chat_id > 0) {
 		file_put_contents("Data/$from_id/data.json",json_encode($data));
 		respondMessage("🧮 به بخش تبلیغات ربات خوش آمدید.\n✏️ لطفا یکی از دکمه های زیر را انتخاب کنید.", $ads_menu, 'markdown');
 	}
-	elseif ($text == '✏️ ثبت تبلیغ') {
-		$ads = json_decode(file_get_contents('Data/ads.json'), true);
-		if (count($ads) > 5) {
-			sendMessage($chat_id, "🚨 امکان ثیت بیش از 5 تبلیغ وجود ندارد.\n🔰 لطفا ابتدا از بخش « 🗑 حذف تبلیغ » اقدام به حذف برخی تبلیغات قدیمی نمایید.", 'markdown', null, $ads_menu);
-		exit();
-		}
-		$data['step'] = "setads";
-		file_put_contents("Data/$from_id/data.json", json_encode($data));
-		respondMessage("🔰 لطفا تبلیغ مورد نظر خود را بفرستید.", $backpanelads);
-	}
+	## Old ads management code removed - replaced with callback query based system
+	## Step 'setads' now handled when user starts creating an ad and sends content
 	elseif ($step == 'setads') {
 		$ad_code = time();
 		$ads = json_decode(file_get_contents('Data/ads.json'), true);
@@ -1071,9 +1254,10 @@ if ($from_id == $admin && $chat_id > 0) {
 		}
 		elseif (isset($message->text)) {
 			$type = 'text';
+			$file_id = null;
 		}
 		else {
-			sendMessage($chat_id, "🚨 تنها متن، تصویر، ویدیو و فایل قابل قبول هستند.", null, $message_id);
+			respondMessage("🚨 تنها متن، تصویر، ویدیو و فایل قابل قبول هستند.", $backpanelads);
 			exit();
 		}
 		$ads[$ad_code] = [];
@@ -1086,22 +1270,40 @@ if ($from_id == $admin && $chat_id > 0) {
 		file_put_contents('Data/ads.json', json_encode($ads));
 		$data['step'] = "setkeyboard-$ad_code";
 		file_put_contents("Data/$from_id/data.json", json_encode($data));
+		
 		$inline_keyboard = json_encode([
 			'inline_keyboard' => [
-				[['text' => '🔴 بدون دکمه شیشه ای', 'callback_data' => 'no_button']]
+				[['text' => '🔴 بدون دکمه', 'callback_data' => "ads_nokeyboard_$ad_code"]],
+				[['text' => '❌ لغو', 'callback_data' => "ads_cancel_$ad_code"]]
 			]
 		]);
-		respondMessage("✅ تبلیغ شما ثبت شد.\n🌐 حالا می توانید برای آن دکمه شیشه ای تعیین کنید.\n🍭 برای تنظیم دکمهٔ شیشه ای به صورت زیر عمل کنید :\n`text1|url1,text2|url2,text3,url3\ntext4|url4,text5|url5`\n\n❗️ نکته : تعداد ستون ها توسط تلگرام به عدد ۶ محدود شده است.", $inline_keyboard, 'markdown');
+		respondMessage("✅ تبلیغ شما آماده شد.\n🌐 حالا می توانید برای آن دکمه شیشه ای تعیین کنید.\n\n🍭 برای تنظیم دکمه شیشه‌ای به صورت زیر عمل کنید:\n\n`متن دکمه 1|لینک 1, متن دکمه 2|لینک 2`\n`متن دکمه 3|لینک 3`\n\n❗️ هر خط یک ردیف دکمه و هر کاما یک دکمه جدید در همان ردیف", $inline_keyboard, 'markdown');
 	}
-	elseif ($step != str_replace('setkeyboard-', '', $step)) {
+	elseif (preg_match('#^setkeyboard\-([0-9]+)$#', $step, $matches) && !isset($update->callback_query)) {
+		$ad_code = $matches[1];
 		$ads = json_decode(file_get_contents('Data/ads.json'), true);
-		$ad_code = str_replace('setkeyboard-', '', $step);
-		$inline_keyboard = null;
-		if ($text != '🔴 بدون دکمه شیشه ای') {
-			$inline_keyboard = makeInlineKeyboard($text);
-			$ads[$ad_code]['keyboard'] = $inline_keyboard;
-			file_put_contents('Data/ads.json', json_encode($ads));
+		if (!isset($ads[$ad_code])) {
+			respondMessage("❗️ خطا در پیدا کردن تبلیغ.", $ads_menu);
+			$data['step'] = "none";
+			file_put_contents("Data/$from_id/data.json", json_encode($data));
+			exit();
 		}
+		
+		$inline_keyboard = makeInlineKeyboard($text);
+		if ($inline_keyboard === null) {
+			respondMessage("❌ فرمت دکمه شیشه‌ای اشتباه است.\nلطفا دوباره تلاش کنید یا بدون دکمه ادامه دهید.", json_encode([
+				'inline_keyboard' => [
+					[['text' => '🔴 بدون دکمه', 'callback_data' => "ads_nokeyboard_$ad_code"]],
+					[['text' => '❌ لغو', 'callback_data' => "ads_cancel_$ad_code"]]
+				]
+			]));
+			exit();
+		}
+		
+		$ads[$ad_code]['keyboard'] = $inline_keyboard;
+		file_put_contents('Data/ads.json', json_encode($ads));
+		
+		// نمایش پیش‌نمایش نهایی
 		$type = $ads[$ad_code]['type'];
 		$method = str_replace(['video', 'photo', 'document', 'text'], ['sendVideo', 'sendPhoto', 'sendDocument', 'sendMessage'], $type);
 		$dataa = [
@@ -1119,98 +1321,17 @@ if ($from_id == $admin && $chat_id > 0) {
 			$dataa['reply_markup'] = json_encode($inline_keyboard);
 		}
 		bot($method, $dataa);
-		$confirm_keyboard = json_encode([
+		
+		$final_confirm_keyboard = json_encode([
 			'inline_keyboard' => [
 				[
-					['text' => '✅ بله', 'callback_data' => 'confirm_yes'],
-					['text' => '❌ خیر', 'callback_data' => 'confirm_no']
+					['text' => '✅ تأیید و ثبت نهایی', 'callback_data' => "ads_final_confirm_$ad_code"],
+					['text' => '❌ لغو', 'callback_data' => "ads_cancel_$ad_code"]
 				]
 			]
 		]);
-		respondMessage("👆🏻 تبلیغ مورد نظر به شرح بالا است.\n💠 آیا از ثبت نهایی آن مطمئن هستید؟", $confirm_keyboard);
-		$data['step'] = "accept-$ad_code";
-		file_put_contents("Data/$from_id/data.json", json_encode($data));
-	}
-	elseif ($step != str_replace('accept-', '', $step)) {
-		$ads = json_decode(file_get_contents('Data/ads.json'), true);
-		$ad_code = str_replace('accept-', '', $step);
-		$data['step'] = "none";
-		file_put_contents("Data/$from_id/data.json", json_encode($data));
-		if ($text == '✅ بله') {
-			$ads[$ad_code]['on'] = true;
-			file_put_contents('Data/ads.json', json_encode($ads));
-			sendMessage($chat_id, "✅ تبلیغ مورد نظر شما با موفقیت ثبت شد.", null, $message_id, $ads_menu);
-		} else {
-			unset($ads[$ad_code]);
-			file_put_contents('Data/ads.json', json_encode($ads));
-			sendMessage($chat_id, "❌ تبلیغ مورد نظر شما ثبت نشد.", null, $message_id, $ads_menu);
-		}
-	}
-	elseif ($text == '🗒 لیست تبلیغات') {
-		$ads = json_decode(file_get_contents('Data/ads.json'), true);
-		$count = count($ads);
-		if ($count < 1) {
-			respondMessage('❗️ هیچ تبلیغی ثبت نشده است.', $ads_menu);
-		}
-		else {
-		$text = "📊 تعداد : $count\n\n";
-		foreach ($ads as $key => $ad) {
-			$text .= "🔦 نوع : " . str_replace(['video', 'photo', 'document', 'text'], ['🎥 ویدیو', '🌠 تصویر', '📎 فایل', '📃 متن'], $ad['type']);
-			$text .= "\n🧭 تعداد بازدید : " . $ad['count'];
-			$text .= "\n🔰 نمایش : " . ($ad['on'] == true ? '✅ بله' : '❌ خیر');
-			$text .= "\n📌 دکمه شیشه ای : " . ($ad['keyboard'] == null ? '❌ ندارد' : '✅ دارد');
-			$text .= "\n🗑 حذف : /delete_$key\n\n";
-		}
-			respondMessage($text, $ads_menu);
-		}
-	}
-	elseif (preg_match("|\/delete\_([0-9]+)|i", $text, $matches)) {
-		$ads = json_decode(file_get_contents('Data/ads.json'), true);
-		$ad_code = $matches[1];
-		if (!isset($ads[$ad_code])) {
-			sendMessage($chat_id, '❗️ تبلیغ مورد نظر شما وجود ندارد.', null, $message_id, $ads_menu);
-			exit();
-		}
-		$type = $ads[$ad_code]['type'];
-		$method = str_replace(['video', 'photo', 'document', 'text'], ['sendVideo', 'sendPhoto', 'sendDocument', 'sendMessage'], $type);
-		$dataa = [
-			'chat_id' => $chat_id,
-			'parse_mode' => 'html'
-		];
-		if ($type == 'text') {
-			$dataa['text'] = $ads[$ad_code]['text'];
-			$dataa['disable_web_page_preview'] = true;
-		} else {
-			$dataa[$type] = 'https://telegram.me/' . str_replace('@', '', $public_logchannel) . '/' . $ads[$ad_code]['file_id'];
-			$dataa['caption'] = $ads[$ad_code]['text'];
-		}
-		if ($ads[$ad_code]['keyboard'] != null) {
-			$dataa['reply_markup'] = json_encode($ads[$ad_code]['keyboard']);
-		}
-		bot($method, $dataa);
-		$delete_confirm_keyboard = json_encode([
-			'inline_keyboard' => [
-				[
-					['text' => '✅ بله', 'callback_data' => 'delete_yes'],
-					['text' => '❌ خیر', 'callback_data' => 'delete_no']
-				]
-			]
-		]);
-		respondMessage("👆🏻 تبلیغ مورد نظر به شرح بالا است.\n💠 آیا از حذف آن مطمئن هستید؟", $delete_confirm_keyboard);
-		$data['step'] = "delete-$ad_code";
-		file_put_contents("Data/$from_id/data.json", json_encode($data));
-
-	}
-	elseif ($step != str_replace('delete-', '', $step)) {
-		if ($text == '✅ بله') {
-			$ads = json_decode(file_get_contents('Data/ads.json'), true);
-			$ad_code = str_replace('delete-', '', $step);
-			unset($ads[$ad_code]);
-			file_put_contents('Data/ads.json', json_encode($ads));
-			sendMessage($chat_id, '✅ تبلیغ مورد نظر شما با موفقیت حذف شد.', null, $message_id, $ads_menu);
-		} else {
-			sendMessage($chat_id, '✅ تبلیغ مورد نظر شما باقی ماند و حذف نشد.', null, $message_id, $ads_menu);
-		}
+		respondMessage("👆🏻 تبلیغ مورد نظر به شرح بالا است (با دکمه شیشه‌ای).\n💠 آیا از ثبت نهایی آن مطمئن هستید؟", $final_confirm_keyboard);
+		
 		$data['step'] = "none";
 		file_put_contents("Data/$from_id/data.json", json_encode($data));
 	}
